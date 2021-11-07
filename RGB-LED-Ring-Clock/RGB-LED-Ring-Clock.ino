@@ -41,7 +41,11 @@ int noteQuantity = 24;
 
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 
+int lastHour = -1;
+int lastMinute = 0;
 
+
+// ***************************************************************************************************
 // ** Plays full chimes on pezieo
 void playWestminsterChimes() {
   for (int thisNote = 0; thisNote < noteQuantity; thisNote++) {
@@ -60,38 +64,69 @@ void playBong(int bongDurationMs) {
   noTone(buzzerPin);
 }
 
-// Uses the RTC to get the current time as a DateTime object
+
+// ** Play chimes on the hour
+void playHourlyChimes(int currHour) {
+  playWestminsterChimes();
+  int numBongs = currHour % 12;
+  if( numBongs == 0 ) { numBongs = 12; }
+
+  for( int i = 0; i < numBongs; i++ ) {
+    playBong(1200);
+    delay(600);
+  }
+}
+
+
+// ** Uses the RTC to get the current time as a DateTime object
 DateTime getCurrentTime() {
   DateTime now = rtc.now();
   return now;
 }
 
 
-// Rainbow cycle along whole strip. Pass delay time (in ms) between frames.
-void rainbow(int wait) {
-  // Hue of first pixel runs 5 complete loops through the color wheel.
-  // Color wheel has a range of 65536 but it's OK if we roll over, so
-  // just count from 0 to 5*65536. Adding 256 to firstPixelHue each time
-  // means we'll make 5*65536/256 = 1280 passes through this outer loop:
-  for(long firstPixelHue = 0; firstPixelHue < 5*65536; firstPixelHue += 256) {
-    for(int i=0; i<strip.numPixels(); i++) { // For each pixel in strip...
-      // Offset pixel hue by an amount to make one full revolution of the
-      // color wheel (range of 65536) along the length of the strip
-      // (strip.numPixels() steps):
-      int pixelHue = firstPixelHue + (i * 65536L / strip.numPixels());
-      // strip.ColorHSV() can take 1 or 3 arguments: a hue (0 to 65535) or
-      // optionally add saturation and value (brightness) (each 0 to 255).
-      // Here we're using just the single-argument hue variant. The result
-      // is passed through strip.gamma32() to provide 'truer' colors
-      // before assigning to each pixel:
-      strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue)));
-    }
-    strip.show(); // Update strip with new contents
-    delay(wait);  // Pause for a moment
+// ** Calculate new clock LED lights
+void updateClockLEDs() {
+  DateTime now = getCurrentTime();
+
+  for( int i = 0; i < LED_COUNT; i++ ) {
+    strip.setPixelColor(i, strip.Color(0,0,0));
   }
+  
+  int secLED = now.second() % LED_COUNT;
+  strip.setPixelColor(secLED, strip.Color(127, 0, 0));
+
+  int minLED = now.minute() % LED_COUNT;
+  strip.setPixelColor(minLED, strip.Color(0, 127, 0));
+
+  int hourLED = now.hour() % LED_COUNT;
+  strip.setPixelColor(hourLED, strip.Color(0, 0, 127));
+
+  strip.show();
 }
 
 
+// ** Decide if the chimes should run and do em
+void handleChimes() {
+  DateTime now = getCurrentTime();
+
+  int currHour = now.hour();
+  int currMinute = now.minute();
+  if( lastHour != currHour ) {
+    lastHour = currHour;
+    // The hour updated, time to play some chimes!
+    playHourlyChimes(currHour);
+  }
+
+  if( currMinute == 30 && lastMinute != 30 ) {
+    // Play half hour bong
+    playBong(1200);
+  }
+  lastMinute = currMinute;
+}
+
+
+// *******************************************************************************************
 void setup() {
 // Support for ATtiny85 clock and the RGB LEDs
 #if defined(__AVR_ATtiny85__) && (F_CPU == 16000000)
@@ -122,36 +157,39 @@ void setup() {
 }
 
 
+// ** Main Loop
 void loop() {
-  rainbow(3);             // Flowing rainbow cycle along the whole strip
+  updateClockLEDs();
+  handleChimes();
 
-  
-  DateTime now = getCurrentTime();
+  delay(1000);
+}
+
+
+// ***********************************************************************************************************
+//  Serial.print(now.year(), DEC);
+//  Serial.print('/');
+//  Serial.print(now.month(), DEC);
+//  Serial.print('/');
+//  Serial.print(now.day(), DEC);
+//  Serial.print(" (");
+//  Serial.print(daysOfTheWeek[now.dayOfTheWeek()]);
+//  Serial.print(") ");
+//  Serial.print(now.hour(), DEC);
+//  Serial.print(':');
+//  Serial.print(now.minute(), DEC);
+//  Serial.print(':');
+//  Serial.print(now.second(), DEC);
+//  Serial.println();
+//  Serial.print(" since midnight 1/1/1970 = ");
+//  Serial.print(now.unixtime());
+//  Serial.print("s = ");
+//  Serial.print(now.unixtime() / 86400L);
+//  Serial.println("d");
+
+
 
 //strip.setPixelColor(i, color);         //  Set pixel's color (in RAM)
 //    strip.show();                          //  Update strip to match
 //  strip.Color(255,   0,   0)
   
-  Serial.print(now.year(), DEC);
-  Serial.print('/');
-  Serial.print(now.month(), DEC);
-  Serial.print('/');
-  Serial.print(now.day(), DEC);
-  Serial.print(" (");
-  Serial.print(daysOfTheWeek[now.dayOfTheWeek()]);
-  Serial.print(") ");
-  Serial.print(now.hour(), DEC);
-  Serial.print(':');
-  Serial.print(now.minute(), DEC);
-  Serial.print(':');
-  Serial.print(now.second(), DEC);
-  Serial.println();
-  Serial.print(" since midnight 1/1/1970 = ");
-  Serial.print(now.unixtime());
-  Serial.print("s = ");
-  Serial.print(now.unixtime() / 86400L);
-  Serial.println("d");
-
-  // delay(3000);
-
-}
