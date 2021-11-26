@@ -36,8 +36,8 @@ int noteDurations[] = {
 int noteQuantity = 24;
 
 
-#define LED_PIN    6
-#define LED_COUNT 16
+#define LED_PIN    9
+#define LED_COUNT 84
 
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 
@@ -93,13 +93,13 @@ void updateClockLEDs() {
     strip.setPixelColor(i, strip.Color(0,0,0));
   }
   
-  int secLED = now.second() % LED_COUNT;
+  int secLED = now.second() % 60;
   strip.setPixelColor(secLED, strip.Color(127, 0, 0));
 
-  int minLED = now.minute() % LED_COUNT;
+  int minLED = now.minute() % 60;
   strip.setPixelColor(minLED, strip.Color(0, 127, 0));
 
-  int hourLED = now.hour() % LED_COUNT;
+  int hourLED = now.hour() % 24 + 60;
   strip.setPixelColor(hourLED, strip.Color(0, 0, 127));
 
   strip.show();
