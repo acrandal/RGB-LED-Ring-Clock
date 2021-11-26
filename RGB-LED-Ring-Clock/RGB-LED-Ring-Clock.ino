@@ -9,15 +9,20 @@
  *  
  */
 
-#include "RTClib.h"
-#include "pitches.h"
+#include "RTClib.h"   // Library for Real Time Clock DS1307
+#include "pitches.h"  // My set of musical note pitches
 
 #include <Adafruit_NeoPixel.h>
 
 
+// Real Time Clock Driver
 RTC_DS1307 rtc;
 
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+
+
+#define DST_ENABLE_PIN 4    // Daylight savings time switch
+#define CHIMES_ENABLE_PIN 3 // Clock chimes enable switch
 
 
 // Pin pezieo is attached to
@@ -35,9 +40,18 @@ int noteDurations[] = {
 
 int noteQuantity = 24;
 
-
+// RGB LED Ring Base Configuration
 #define LED_PIN    9
 #define LED_COUNT 84
+
+#define LED_SEC_BASE_INDEX 0
+#define LED_MIN_BASE_INDEX 0
+#define LED_HOUR_BASE_INDEX 60
+#define LED_SEC_COUNT 60
+#define LED_MIN_COUNT 60
+#define LED_HOUR_COUNT 24
+
+
 
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 
@@ -77,6 +91,16 @@ void playHourlyChimes(int currHour) {
   }
 }
 
+// ** SHOW hourly chimes when buzzer disabled
+void showHourlyChimes(int currHour) {
+  LED_Blink(currHour, 100, 100);
+}
+
+// ** SHOW a half hour "bong"
+void showHalfHourChimes() {
+  LED_Blink(1, 1200, 0);
+}
+
 
 // ** Uses the RTC to get the current time as a DateTime object
 DateTime getCurrentTime() {
@@ -84,10 +108,20 @@ DateTime getCurrentTime() {
   return now;
 }
 
+int getCurrHour() {
+  DateTime now = getCurrentTime();
+  int currHour = now.hour();
+  if( isDSTEnabled() ) {
+    currHour = (currHour + 1) % 24;
+  }  
+  return currHour;
+}
+
 
 // ** Calculate new clock LED lights
 void updateClockLEDs() {
   DateTime now = getCurrentTime();
+  int currHour = getCurrHour();
 
   for( int i = 0; i < LED_COUNT; i++ ) {
     strip.setPixelColor(i, strip.Color(0,0,0));
@@ -99,7 +133,7 @@ void updateClockLEDs() {
   int minLED = now.minute() % 60;
   strip.setPixelColor(minLED, strip.Color(0, 127, 0));
 
-  int hourLED = now.hour() % 24 + 60;
+  int hourLED = currHour % 24 + 60;
   strip.setPixelColor(hourLED, strip.Color(0, 0, 127));
 
   strip.show();
@@ -114,15 +148,50 @@ void handleChimes() {
   int currMinute = now.minute();
   if( lastHour != currHour ) {
     lastHour = currHour;
-    // The hour updated, time to play some chimes!
-    playHourlyChimes(currHour);
+    // The hour updated and chimes are enabled, time to play some chimes!
+    if(isChimesEnabled()) {
+      playHourlyChimes(currHour);
+    } else {
+      showHourlyChimes(currHour);
+    }
   }
 
   if( currMinute == 30 && lastMinute != 30 ) {
     // Play half hour bong
-    playBong(1200);
+    if(isChimesEnabled()) {
+      playBong(1200);
+    } else {
+      showHalfHourChimes();
+    }
   }
   lastMinute = currMinute;
+}
+
+bool isChimesEnabled() {
+  return( digitalRead(CHIMES_ENABLE_PIN) == LOW );
+}
+
+bool isDSTEnabled() {
+  return( digitalRead(DST_ENABLE_PIN) == LOW );
+}
+
+
+// On board LED controls
+void LED_ON() { digitalWrite(LED_BUILTIN, HIGH); }
+void LED_OFF() { digitalWrite(LED_BUILTIN, LOW); }
+void LED_Blink(int delay_ms) {
+  LED_ON();
+  delay(delay_ms);
+  LED_OFF();
+}
+
+void LED_Blink(int count, int on_ms, int off_ms) {
+  for(int i = 0; i < count; i++) {
+    LED_ON();
+    delay(on_ms);
+    LED_OFF();
+    delay(off_ms);
+  }
 }
 
 
@@ -132,9 +201,15 @@ void setup() {
 #if defined(__AVR_ATtiny85__) && (F_CPU == 16000000)
   clock_prescale_set(clock_div_1);
 #endif
+
+  pinMode(LED_BUILTIN, OUTPUT);   // Setup onboard LED
+  pinMode(DST_ENABLE_PIN, INPUT_PULLUP);
+  pinMode(CHIMES_ENABLE_PIN, INPUT_PULLUP);
   
   // Turn on the serial interface for debugging/testing
   Serial.begin(115200);
+
+  LED_Blink(5, 200, 100);
 
   // Setup the RGB LED strip
   strip.begin();           // INITIALIZE NeoPixel strip object (REQUIRED)
@@ -144,12 +219,21 @@ void setup() {
   // Connect over I2C to the RTC chip
   if (! rtc.begin()) {
    Serial.println("Couldn't find RTC");
-   while (1);
+   while (1) { LED_Blink(10, 50, 50); }
   }
 
   if (! rtc.isrunning()) {
     Serial.println("RTC is not running - need to program for current time");
-    while(1);
+    while(1) { LED_Blink(10, 50, 100); }
+  }
+
+  // Get current hour to prevent chimes on boot
+  if(!isChimesEnabled()) {
+    Serial.println("Chimes disabled");
+    DateTime now = getCurrentTime();
+    lastHour = now.hour();
+  } else {
+    Serial.println("Chimes enabled - play warm-up music");
   }
 
   Serial.println("RTC and LEDs up - starting main operations");
