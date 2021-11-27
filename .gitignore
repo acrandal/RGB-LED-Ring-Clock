@@ -30,3 +30,12 @@
 *.exe
 *.out
 *.app
+
+# FreeCAD Backups
+*.FCStd?
+
+# 3D printer models
+*.stl
+
+# VIM temp files
+*.swp
