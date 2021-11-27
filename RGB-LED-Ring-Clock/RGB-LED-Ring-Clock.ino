@@ -9,21 +9,19 @@
  *  
  */
 
+// ArduinoIDE system libraries
+#include <Adafruit_NeoPixel.h>
 #include "RTClib.h"   // Library for Real Time Clock DS1307
+
+// Project libraries
 #include "pitches.h"  // My set of musical note pitches
 
-#include <Adafruit_NeoPixel.h>
 
-
-// Real Time Clock Driver
+// Real Time Clock Object/API
 RTC_DS1307 rtc;
-
-char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-
 
 #define DST_ENABLE_PIN 4    // Daylight savings time switch
 #define CHIMES_ENABLE_PIN 3 // Clock chimes enable switch
-
 
 // Pin pezieo is attached to
 int buzzerPin = 8;
@@ -40,9 +38,10 @@ int noteDurations[] = {
 
 int noteQuantity = 24;
 
-// RGB LED Ring Base Configuration
+// RGB LED Ring pins and base offsets Configuration
 #define LED_PIN    9
 #define LED_COUNT 84
+#define LED_BRIGHTNESS 100      // One-off max LED brightness
 
 #define LED_SEC_BASE_INDEX 0
 #define LED_MIN_BASE_INDEX 0
@@ -51,12 +50,20 @@ int noteQuantity = 24;
 #define LED_MIN_COUNT 60
 #define LED_HOUR_COUNT 24
 
+#define COMET_ENABLED true
+#define COMET_FADE_RATE 0.40
 
-
+// RGB LED / NeoPixel Setup
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 
+uint32_t hourColor = strip.Color(0,0,255);    // Hours are blue?
+uint32_t minColor = strip.Color(0,255,0);   // Minutes are green!
+uint32_t secColor = strip.Color(255,0,0);     // Seconds are red?
+
+// Prior state recording - for hour & half hour chimes
 int lastHour = -1;
 int lastMinute = 0;
+
 
 
 // ***************************************************************************************************
@@ -98,9 +105,20 @@ void showHourlyChimes(int currHour) {
 
 // ** SHOW a half hour "bong"
 void showHalfHourChimes() {
-  LED_Blink(1, 1200, 0);
+  LED_Blink(1, 750, 0);
 }
 
+// ** Calculates outer ring light index based on input index (usually a base 60 time)
+int calcOuterRingIndex(int inIndex) {
+  int ledIndex = 0;
+  if( inIndex >= 30 ) {
+    ledIndex = LED_SEC_BASE_INDEX + (inIndex - 30);
+  }
+  else {
+    ledIndex = LED_SEC_BASE_INDEX + (inIndex + 30);
+  }
+  return ledIndex;
+}
 
 // ** Uses the RTC to get the current time as a DateTime object
 DateTime getCurrentTime() {
@@ -117,26 +135,73 @@ int getCurrHour() {
   return currHour;
 }
 
+// ** Show the current hour on the inner LED ring
+void showCurrHour(int currHour) {
+  int ledIndex = 0;
+  if( currHour >= 15 ) {
+    ledIndex = LED_HOUR_BASE_INDEX + (currHour - 15);
+  }
+  else {
+    ledIndex = LED_HOUR_BASE_INDEX + 9 + currHour;
+  }
+  strip.setPixelColor(ledIndex, hourColor);
+}
+
+
+// ** Show current Minute on the outer LED Ring
+void showCurrMin(int currMin) {
+  int ledIndex = calcOuterRingIndex(currMin);
+  strip.setPixelColor(ledIndex, minColor);
+}
+
+// ** A simple "fading comet" to make seconds more interesting
+void showComet(int currSec) {
+  int red = 255;
+  int minRed = 10;
+  while( red > minRed ) {
+    red *= COMET_FADE_RATE;
+    currSec--;
+    if( currSec < 0 ) {
+      currSec = 59;
+    }
+    int ledIndex = calcOuterRingIndex(currSec);
+    strip.setPixelColor(ledIndex, strip.Color(red, 0, 0));
+  }
+}
+
+// ** Show current second on the outer LED Ring
+void showCurrSec(int currSec) {
+  int ledIndex = calcOuterRingIndex(currSec);
+  strip.setPixelColor(ledIndex, secColor);
+
+  if(COMET_ENABLED){
+    showComet(currSec);
+  }
+}
+
+
+// ** Clear all RGB LEDs
+void clearLEDs() {
+  for( int i = 0; i < LED_COUNT; i++ ) {
+    strip.setPixelColor(i, strip.Color(0,0,0));
+  }
+}
 
 // ** Calculate new clock LED lights
 void updateClockLEDs() {
   DateTime now = getCurrentTime();
   int currHour = getCurrHour();
+  int currSec = now.second();
+  int currMin = now.minute();
 
-  for( int i = 0; i < LED_COUNT; i++ ) {
-    strip.setPixelColor(i, strip.Color(0,0,0));
-  }
-  
-  int secLED = now.second() % 60;
-  strip.setPixelColor(secLED, strip.Color(127, 0, 0));
+  clearLEDs();
 
-  int minLED = now.minute() % 60;
-  strip.setPixelColor(minLED, strip.Color(0, 127, 0));
+  // Render out the LED colors
+  showCurrSec(currSec);
+  showCurrMin(currMin);
+  showCurrHour(currHour);
 
-  int hourLED = currHour % 24 + 60;
-  strip.setPixelColor(hourLED, strip.Color(0, 0, 127));
-
-  strip.show();
+  strip.show(); // Ensure all updates are rendered
 }
 
 
@@ -214,7 +279,7 @@ void setup() {
   // Setup the RGB LED strip
   strip.begin();           // INITIALIZE NeoPixel strip object (REQUIRED)
   strip.show();            // Turn OFF all pixels ASAP
-  strip.setBrightness(50); // Set BRIGHTNESS to about 1/5 (max = 255)
+  strip.setBrightness(LED_BRIGHTNESS); // Set BRIGHTNESS to about 1/5 (max = 255)
 
   // Connect over I2C to the RTC chip
   if (! rtc.begin()) {
@@ -248,32 +313,3 @@ void loop() {
 
   delay(1000);
 }
-
-
-// ***********************************************************************************************************
-//  Serial.print(now.year(), DEC);
-//  Serial.print('/');
-//  Serial.print(now.month(), DEC);
-//  Serial.print('/');
-//  Serial.print(now.day(), DEC);
-//  Serial.print(" (");
-//  Serial.print(daysOfTheWeek[now.dayOfTheWeek()]);
-//  Serial.print(") ");
-//  Serial.print(now.hour(), DEC);
-//  Serial.print(':');
-//  Serial.print(now.minute(), DEC);
-//  Serial.print(':');
-//  Serial.print(now.second(), DEC);
-//  Serial.println();
-//  Serial.print(" since midnight 1/1/1970 = ");
-//  Serial.print(now.unixtime());
-//  Serial.print("s = ");
-//  Serial.print(now.unixtime() / 86400L);
-//  Serial.println("d");
-
-
-
-//strip.setPixelColor(i, color);         //  Set pixel's color (in RAM)
-//    strip.show();                          //  Update strip to match
-//  strip.Color(255,   0,   0)
-  
