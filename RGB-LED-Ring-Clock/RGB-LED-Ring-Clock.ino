@@ -64,6 +64,12 @@ uint32_t secColor = strip.Color(255,0,0);     // Seconds are red?
 int lastHour = -1;
 int lastMinute = 0;
 
+// Photoresistor settings
+#define PHOTORESISTOR_PIN A0
+#define PHOTORESISTOR_OFF_THRESHOLD 40
+
+// Light up sign settings
+#define SIGN_LED_PIN 6
 
 
 // ***************************************************************************************************
@@ -126,6 +132,7 @@ DateTime getCurrentTime() {
   return now;
 }
 
+// ** Reads RTC and handled Daylight Savings Time adjustments
 int getCurrHour() {
   DateTime now = getCurrentTime();
   int currHour = now.hour();
@@ -241,7 +248,7 @@ bool isDSTEnabled() {
 }
 
 
-// On board LED controls
+// ** On board LED controls
 void LED_ON() { digitalWrite(LED_BUILTIN, HIGH); }
 void LED_OFF() { digitalWrite(LED_BUILTIN, LOW); }
 void LED_Blink(int delay_ms) {
@@ -259,6 +266,18 @@ void LED_Blink(int count, int on_ms, int off_ms) {
   }
 }
 
+// ** Light up sign status
+void handleSignState() {
+  int curr_photoresistor_read_value = analogRead(PHOTORESISTOR_PIN);
+  // Serial.print("Photo read: ");
+  // Serial.println(curr_photoresistor_read_value);
+  if( curr_photoresistor_read_value < PHOTORESISTOR_OFF_THRESHOLD ) {
+    digitalWrite(SIGN_LED_PIN, HIGH);
+  } else {
+    digitalWrite(SIGN_LED_PIN, LOW);
+  }
+}
+
 
 // *******************************************************************************************
 void setup() {
@@ -270,6 +289,9 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);   // Setup onboard LED
   pinMode(DST_ENABLE_PIN, INPUT_PULLUP);
   pinMode(CHIMES_ENABLE_PIN, INPUT_PULLUP);
+
+  pinMode(SIGN_LED_PIN, OUTPUT);
+  pinMode(PHOTORESISTOR_PIN, INPUT);
   
   // Turn on the serial interface for debugging/testing
   Serial.begin(115200);
@@ -310,6 +332,7 @@ void setup() {
 void loop() {
   updateClockLEDs();
   handleChimes();
+  handleSignState();
 
   delay(1000);
 }
