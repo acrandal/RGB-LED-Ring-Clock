@@ -145,12 +145,12 @@ int getCurrHour() {
 // ** Show the current hour on the inner LED ring
 void showCurrHour(int currHour) {
   int ledIndex = 0;
-  if( currHour >= 15 ) {
-    ledIndex = LED_HOUR_BASE_INDEX + (currHour - 15);
+  if( currHour <= 2 ) {
+    ledIndex = LED_HOUR_BASE_INDEX + (currHour + 81);
+  } else {
+    ledIndex = LED_HOUR_BASE_INDEX + (currHour - 3);
   }
-  else {
-    ledIndex = LED_HOUR_BASE_INDEX + 9 + currHour;
-  }
+
   strip.setPixelColor(ledIndex, hourColor);
 }
 
