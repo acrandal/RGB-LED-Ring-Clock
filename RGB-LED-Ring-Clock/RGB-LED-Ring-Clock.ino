@@ -11,10 +11,14 @@
 
 // ArduinoIDE system libraries
 #include <Adafruit_NeoPixel.h>
-#include "RTClib.h"   // Library for Real Time Clock DS1307
+#include "RTClib.h"   // Library for Real Time Clock DS1307A
+#include <LinkedList.h>
 
 // Project libraries
 #include "pitches.h"  // My set of musical note pitches
+#include "ToneJob.h"  // My struct for holding notes and rests to play
+
+LinkedList<ToneJob> toneJobList = LinkedList<ToneJob>();
 
 
 // Real Time Clock Object/API
@@ -25,6 +29,9 @@ RTC_DS1307 rtc;
 
 // Pin pezieo is attached to
 int buzzerPin = 8;
+
+#define WHOLE_NOTE_DURATION_MS 1200
+#define BONG_DURATION_MS 1200
 
 // Westminster Chimes music:
 int melody[] = {
@@ -71,24 +78,29 @@ int lastMinute = 0;
 // Light up sign settings
 #define SIGN_LED_PIN 6
 
+// Quiet hours setting
+#define EVENING_END_CHIMES_HOUR 21
+#define MORNING_START_CHIMES_HOUR 9
+
 
 // ***************************************************************************************************
 // ** Plays full chimes on pezieo
 void playWestminsterChimes() {
   for (int thisNote = 0; thisNote < noteQuantity; thisNote++) {
-    int noteDuration = 1200 / noteDurations[thisNote];
-    tone(buzzerPin, melody[thisNote], noteDuration);
-    int pauseBetweenNotes = noteDuration * 1.30;
-    delay(pauseBetweenNotes);
-    noTone(buzzerPin);
+    ToneJob newToneJob;
+    newToneJob.melody_pitch = melody[thisNote];
+    newToneJob.duration = noteDurations[thisNote];
+    toneJobList.add(newToneJob);
   }  
 }
 
+
 // ** Play a bong on the pezieo
-void playBong(int bongDurationMs) {
-  tone(buzzerPin, NOTE_B0, bongDurationMs);
-  delay(bongDurationMs);
-  noTone(buzzerPin);
+void playBong() {
+  ToneJob newToneJob;
+  newToneJob.melody_pitch = NOTE_B0;
+  newToneJob.duration = 1;
+  toneJobList.add(newToneJob);
 }
 
 
@@ -99,20 +111,22 @@ void playHourlyChimes(int currHour) {
   if( numBongs == 0 ) { numBongs = 12; }
 
   for( int i = 0; i < numBongs; i++ ) {
-    playBong(1200);
-    delay(600);
+    playBong();
   }
 }
+
 
 // ** SHOW hourly chimes when buzzer disabled
 void showHourlyChimes(int currHour) {
   LED_Blink(currHour, 100, 100);
 }
 
+
 // ** SHOW a half hour "bong"
 void showHalfHourChimes() {
   LED_Blink(1, 750, 0);
 }
+
 
 // ** Calculates outer ring light index based on input index (usually a base 60 time)
 int calcOuterRingIndex(int inIndex) {
@@ -126,11 +140,13 @@ int calcOuterRingIndex(int inIndex) {
   return ledIndex;
 }
 
+
 // ** Uses the RTC to get the current time as a DateTime object
 DateTime getCurrentTime() {
   DateTime now = rtc.now();
   return now;
 }
+
 
 // ** Reads RTC and handled Daylight Savings Time adjustments
 int getCurrHour() {
@@ -142,15 +158,16 @@ int getCurrHour() {
   return currHour;
 }
 
+
 // ** Show the current hour on the inner LED ring
 void showCurrHour(int currHour) {
   int ledIndex = 0;
-  if( currHour >= 15 ) {
-    ledIndex = LED_HOUR_BASE_INDEX + (currHour - 15);
+  if( currHour <= 2 ) {
+    ledIndex = LED_HOUR_BASE_INDEX + (currHour + 81);
+  } else {
+    ledIndex = LED_HOUR_BASE_INDEX + (currHour - 3);
   }
-  else {
-    ledIndex = LED_HOUR_BASE_INDEX + 9 + currHour;
-  }
+
   strip.setPixelColor(ledIndex, hourColor);
 }
 
@@ -160,6 +177,7 @@ void showCurrMin(int currMin) {
   int ledIndex = calcOuterRingIndex(currMin);
   strip.setPixelColor(ledIndex, minColor);
 }
+
 
 // ** A simple "fading comet" to make seconds more interesting
 void showComet(int currSec) {
@@ -175,6 +193,7 @@ void showComet(int currSec) {
     strip.setPixelColor(ledIndex, strip.Color(red, 0, 0));
   }
 }
+
 
 // ** Show current second on the outer LED Ring
 void showCurrSec(int currSec) {
@@ -194,6 +213,7 @@ void clearLEDs() {
   }
 }
 
+
 // ** Calculate new clock LED lights
 void updateClockLEDs() {
   DateTime now = getCurrentTime();
@@ -211,6 +231,16 @@ void updateClockLEDs() {
   strip.show(); // Ensure all updates are rendered
 }
 
+// ** Exclude night times for chimes
+bool isQuietHour(int currHour) {
+  if(currHour >= EVENING_END_CHIMES_HOUR) {
+    return true;
+  } else if(currHour < MORNING_START_CHIMES_HOUR) {
+    return true;
+  } else {
+    return false;
+  }
+}
 
 // ** Decide if the chimes should run and do em
 void handleChimes() {
@@ -221,7 +251,7 @@ void handleChimes() {
   if( lastHour != currHour ) {
     lastHour = currHour;
     // The hour updated and chimes are enabled, time to play some chimes!
-    if(isChimesEnabled()) {
+    if(isChimesEnabled(currHour)) {
       playHourlyChimes(currHour);
     } else {
       showHourlyChimes(currHour);
@@ -230,8 +260,8 @@ void handleChimes() {
 
   if( currMinute == 30 && lastMinute != 30 ) {
     // Play half hour bong
-    if(isChimesEnabled()) {
-      playBong(1200);
+    if(isChimesEnabled(currHour)) {
+      playBong();
     } else {
       showHalfHourChimes();
     }
@@ -239,10 +269,15 @@ void handleChimes() {
   lastMinute = currMinute;
 }
 
-bool isChimesEnabled() {
-  return( digitalRead(CHIMES_ENABLE_PIN) == LOW );
+// ** Returns whether the chimes switch is enabled
+// ** Accounts for quiet hours too
+bool isChimesEnabled(int currHour) {
+  bool ret = (digitalRead(CHIMES_ENABLE_PIN) == LOW);
+  ret &= !isQuietHour(currHour);
+  return ret;
 }
 
+// ** Return whether Daylight Savings Time switch is on
 bool isDSTEnabled() {
   return( digitalRead(DST_ENABLE_PIN) == LOW );
 }
@@ -275,6 +310,18 @@ void handleSignState() {
     digitalWrite(SIGN_LED_PIN, HIGH);
   } else {
     digitalWrite(SIGN_LED_PIN, LOW);
+  }
+}
+
+// ** If there's a tone to play, dequeue it, play and return
+void processSingleToneJob() {
+  if(toneJobList.size() > 0) {
+    ToneJob tj = toneJobList.shift();
+    int noteDuration = WHOLE_NOTE_DURATION_MS / tj.duration;
+    tone(buzzerPin, tj.melody_pitch, noteDuration);
+    int pauseBetweenNotes = noteDuration * 1.30;
+    delay(pauseBetweenNotes);
+    noTone(buzzerPin);
   }
 }
 
@@ -315,7 +362,7 @@ void setup() {
   }
 
   // Get current hour to prevent chimes on boot
-  if(!isChimesEnabled()) {
+  if(!isChimesEnabled(12)) {
     Serial.println("Chimes disabled");
     DateTime now = getCurrentTime();
     lastHour = now.hour();
@@ -323,16 +370,23 @@ void setup() {
     Serial.println("Chimes enabled - play warm-up music");
   }
 
+  ToneJob toneJob1;
+  toneJob1.melody_pitch = NOTE_A2;
+  toneJob1.duration = 4;
+  toneJobList.add(toneJob1);
+
   Serial.println("RTC and LEDs up - starting main operations");
 
 }
 
 
-// ** Main Loop
+// ** Main Loop ****************************************************************
 void loop() {
+  processSingleToneJob();
+  
   updateClockLEDs();
   handleChimes();
   handleSignState();
 
-  delay(1000);
+  delay(10);
 }
